@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+if [ -z "${PHONE:-}" ]; then
+	echo "PHONE is required (for example: user@oneplus6.local)" >&2
+	exit 2
+fi
+
+phone=$PHONE
+control_path=${SSH_CONTROL_PATH:-$HOME/.ssh/cm/%r@%h:%p}
+remote_dir=${REMOTE_DIR:-Projects/oneplus-yubikey-nfc}
+
+mkdir -p "$HOME/.ssh/cm"
+if ! ssh -O check -S "$control_path" "$phone" >/dev/null 2>&1; then
+	ssh -M -S "$control_path" -o ControlPersist=30m -fN "$phone"
+fi
+
+make clean
+make all test
+
+ssh -S "$control_path" "$phone" "rm -rf '$remote_dir' && mkdir -p '$remote_dir'"
+scp -o ControlPath="$control_path" -r Makefile README.md src tests vendor packaging scripts \
+	secrets-overlay "$phone:$remote_dir/"
+ssh -S "$control_path" "$phone" "cd '$remote_dir' && make clean && make driver test"
+ssh -t -S "$control_path" "$phone" "cd '$remote_dir' && sudo ./scripts/install-on-phone"
+ssh -S "$control_path" "$phone" \
+	"cd '$remote_dir' && ./scripts/install-secrets-on-phone --dry-run"
+ssh -t -S "$control_path" "$phone" \
+	"cd '$remote_dir' && sudo ./scripts/install-secrets-on-phone --apply"
+
+echo "Deployment complete. Verify with: pcsc_scan"
+echo "Launch the touch UI with: /usr/local/bin/secrets-nfc"

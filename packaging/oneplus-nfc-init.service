@@ -1,0 +1,8 @@
+[Unit]
+Description=Initialize OnePlus 6 PN553 before PC/SC
+Before=pcscd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/oneplus-nfc-init
+TimeoutStartSec=30

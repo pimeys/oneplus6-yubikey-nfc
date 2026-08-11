@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+controller=3-0028
+driver=/sys/bus/i2c/drivers/nxp-nci_i2c
+attempt=0
+
+while [ ! -e "$driver/$controller" ]; do
+	attempt=$((attempt + 1))
+	if [ "$attempt" -ge 20 ]; then
+		echo "NFC controller $controller did not bind within 20 seconds" >&2
+		exit 1
+	fi
+	sleep 1
+done
+
+printf '%s' "$controller" > "$driver/unbind"
+sleep 2
+printf '%s' "$controller" > "$driver/bind"
+rfkill unblock nfc
