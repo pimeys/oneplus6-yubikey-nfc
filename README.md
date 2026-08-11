@@ -4,6 +4,40 @@ Linux NFC-to-PC/SC bridge for using an existing KeePassXC YubiKey HMAC-SHA1 chal
 
 The bridge is operational. KeePassXC 2.7.12 detects both programmed YubiKey OTP slots over NFC and successfully reopened a throwaway KDBX protected by a password plus YubiKey challenge-response. The production vault was not modified.
 
+## Quick install: bridge + GNOME Secrets
+
+This is the recommended path. It installs the PC/SC bridge, GNOME Secrets,
+py3-pyscard, and the touch-friendly YubiKey provider in one deployment.
+
+The phone must already run the patched postmarketOS kernel described below and
+expose `nfc0`. Install its native build dependencies once:
+
+```sh
+sudo apk add build-base pkgconf pcsc-lite-dev libnl3-dev
+```
+
+On the workstation, download or clone this repository and ensure a C compiler,
+Python 3, pkg-config, pcsc-lite and libnl3 development files, OpenSSL headers,
+`wget`, SSH, and SCP are available. Then run:
+
+```sh
+PHONE=user@oneplus6.local ./scripts/deploy-phone
+```
+
+Set `PHONE` to the phone's SSH target. `REMOTE_DIR` optionally overrides the
+home-relative `Projects/oneplus-yubikey-nfc` upload path. The script:
+
+1. Builds and tests the bridge and Secrets provider locally.
+2. Uploads the source and repeats the bridge build and tests on the phone.
+3. Installs the PC/SC driver, PN553 initializer, and systemd configuration.
+4. Simulates, then installs the pinned GNOME Secrets and py3-pyscard packages.
+5. Installs the provider overlay and replaces the normal **Secrets** launcher.
+
+It uses the shared SSH ControlMaster path `~/.ssh/cm/%r@%h:%p` and prompts for
+the phone's sudo password during installation. After it completes, launch the
+normal **Secrets** icon and follow the
+[touch workflow](#touch-friendly-secrets-workflow).
+
 ## Confirmed environment
 
 This works _for me_ and is mostly written by Kimi K3. USE AT YOUR OWN RISK.
@@ -82,16 +116,18 @@ make probe
 
 `make all test` builds both binaries. The probe build downloads libfido2 1.16.0 and verifies SHA-256 `7d86088ef4a48f9faad4ff6f41343328157849153a8dc94d88f4b5461cb29474`.
 
-## Install on the phone
+## Manual installation on the phone
 
-From a project checkout already on the phone:
+Use this path when the project checkout is already on the phone:
 
 ```sh
 make driver test
 sudo ./scripts/install-on-phone
+./scripts/install-secrets-on-phone --dry-run
+sudo ./scripts/install-secrets-on-phone --apply
 ```
 
-The installer:
+The bridge installer:
 
 1. Backs up an existing `/usr/local/lib/libnlnfc.so.0.0.0`.
 2. Installs the IFD handler and stable soname links under `/usr/local/lib`.
@@ -101,27 +137,13 @@ The installer:
 6. Removes obsolete recovery helpers that attempted unsafe live controller resets.
 7. Enables `pcscd.socket` and restarts `pcscd.service`.
 
-From the workstation, the complete build, upload, native aarch64 build, test, and privileged install flow is:
 
-```sh
-PHONE=user@oneplus6.local ./scripts/deploy-phone
-```
+## Touch-friendly Secrets workflow
 
-Set `PHONE` to the phone's SSH target; `REMOTE_DIR` optionally overrides the
-home-relative `Projects/oneplus-yubikey-nfc` upload path. The script uses the
-shared SSH ControlMaster path `~/.ssh/cm/%r@%h:%p` and prompts for the phone
-sudo password only for installation.
-
-### Touch-friendly Secrets workflow
-
-The deployment flow installs Alpine's GNOME Secrets 9.6 and py3-pyscard at
-their tested versions, then places the PC/SC provider only under `/usr/local`.
-It does not patch Alpine-owned Python modules or create a challenge-response
-keyfile. Preview the phone-side install without root or writes with:
-
-```sh
-./scripts/install-secrets-on-phone --dry-run
-```
+Both installation paths install Alpine's GNOME Secrets 9.6 and py3-pyscard at
+their tested versions, then place the PC/SC provider only under `/usr/local`.
+They do not patch Alpine-owned Python modules, alter the KDBX format, or create
+a challenge-response keyfile.
 
 For touch use:
 
