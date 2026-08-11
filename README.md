@@ -6,6 +6,8 @@ The bridge is operational. KeePassXC 2.7.12 detects both programmed YubiKey OTP 
 
 ## Confirmed environment
 
+This works _for me_ and is mostly written by Kimi K3. USE AT YOUR OWN RISK.
+
 - Phone: OnePlus 6 (`oneplus-enchilada`)
 - OS: postmarketOS v26.06 with systemd
 - Kernel: `7.1.0-rc1-sdm845`
