@@ -71,6 +71,12 @@ class CardRequestTimeoutException(Exception):
     pass
 
 
+class CardRemovedException(Exception):
+    def __init__(self, hresult: int) -> None:
+        super().__init__("card removed")
+        self.hresult = hresult
+
+
 class TransportHarness:
     def __init__(self, responses=None, transmit_error=None, wait_error=None) -> None:
         self.reader = FakeReader()
@@ -189,6 +195,43 @@ class PcscOtpTransportTest(unittest.TestCase):
 
         self.assertTrue(harness.request.exited)
         self.assertTrue(harness.service.exited)
+
+    def test_transient_card_removal_retries_exchange(self) -> None:
+        reader = FakeReader()
+        removed_connection = FakeConnection(
+            transmit_error=CardRemovedException(0x8010000C)
+        )
+        removed_service = FakeCardService(removed_connection)
+        removed_request = FakeCardRequest(removed_service)
+        success_connection = FakeConnection(
+            [([], 0x90, 0x00), (list(self.RESPONSE), 0x90, 0x00)]
+        )
+        success_service = FakeCardService(success_connection)
+        success_request = FakeCardRequest(success_service)
+        requests = [removed_request, success_request]
+        request_kwargs = []
+
+        def request_factory(**kwargs):
+            request_kwargs.append(kwargs)
+            return requests.pop(0)
+
+        transport = PcscOtpTransport(
+            readers_fn=lambda: [reader],
+            card_request_factory=request_factory,
+        )
+
+        response = transport.challenge_response(str(reader), 2, b"x", timeout=9)
+
+        self.assertEqual(response, self.RESPONSE)
+        self.assertEqual(len(request_kwargs), 2)
+        self.assertEqual(request_kwargs[0], {"timeout": 9, "readers": [reader]})
+        self.assertGreater(request_kwargs[1]["timeout"], 0)
+        self.assertLessEqual(request_kwargs[1]["timeout"], 9)
+        self.assertEqual(request_kwargs[1]["readers"], [reader])
+        self.assertTrue(removed_request.exited)
+        self.assertTrue(removed_service.exited)
+        self.assertTrue(success_request.exited)
+        self.assertTrue(success_service.exited)
 
     def test_non_success_status_is_rejected_and_resources_are_released(self) -> None:
         harness = TransportHarness(responses=[([], 0x6A, 0x82)])

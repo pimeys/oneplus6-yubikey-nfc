@@ -26,7 +26,7 @@ Python 3, pkg-config, pcsc-lite and libnl3 development files, OpenSSL headers,
 `wget`, SSH, and SCP are available. Then run:
 
 ```sh
-PHONE=user@oneplus6.local ./scripts/deploy-phone
+PHONE=user@oneplus.home.arpa ./scripts/deploy-phone
 ```
 
 Set `PHONE` to the phone's SSH target. `REMOTE_DIR` optionally overrides the

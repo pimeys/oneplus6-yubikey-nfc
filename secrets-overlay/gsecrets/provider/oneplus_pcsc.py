@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,8 @@ class PcscOtpTransport:
 
     _READER_PREFIX = "OnePlus 6 NFC"
     _SELECT_OTP = bytes.fromhex("00 A4 04 00 07 A0 00 00 05 27 20 01")
+    _TRANSIENT_CARD_HRESULTS = (0x8010000C, 0x80100069)
+    _MAX_EXCHANGE_ATTEMPTS = 3
 
     def __init__(
         self,
@@ -48,6 +51,20 @@ class PcscOtpTransport:
         return isinstance(error, CardRequestTimeoutException) or (
             type(error).__name__ == "CardRequestTimeoutException"
         )
+
+    @classmethod
+    def _is_transient_card_error(cls, error: Exception) -> bool:
+        current: BaseException | None = error
+        for _depth in range(8):
+            if current is None:
+                return False
+            hresult = getattr(current, "hresult", None)
+            if isinstance(hresult, int) and (
+                hresult & 0xFFFFFFFF
+            ) in cls._TRANSIENT_CARD_HRESULTS:
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     def _matching_readers(self) -> list[object]:
         try:
@@ -91,32 +108,55 @@ class PcscOtpTransport:
             if reader is None:
                 raise PcscOtpError("OnePlus 6 NFC reader is unavailable")
 
-            try:
-                request_context = self._get_card_request_factory()(
-                    timeout=timeout,
-                    readers=[reader],
+            deadline = time.monotonic() + timeout
+            for attempt in range(self._MAX_EXCHANGE_ATTEMPTS):
+                request_timeout = (
+                    timeout
+                    if attempt == 0
+                    else max(0.0, deadline - time.monotonic())
                 )
-                with request_context as request:
-                    try:
-                        card_service_context = request.waitforcard()
-                    except Exception as error:
-                        if self._is_card_request_timeout(error):
+                try:
+                    request_context = self._get_card_request_factory()(
+                        timeout=request_timeout,
+                        readers=[reader],
+                    )
+                    with request_context as request:
+                        try:
+                            card_service_context = request.waitforcard()
+                        except Exception as error:
+                            if self._is_card_request_timeout(error):
+                                raise PcscOtpError(
+                                    "Timed out waiting for the NFC YubiKey"
+                                ) from error
                             raise PcscOtpError(
-                                "Timed out waiting for the NFC YubiKey"
+                                "NFC YubiKey communication failed"
                             ) from error
-                        raise PcscOtpError("NFC YubiKey communication failed") from error
 
-                    with card_service_context as card_service:
-                        connection = card_service.connection
-                        connection.connect()
-                        _select_data, sw1, sw2 = connection.transmit(list(self._SELECT_OTP))
-                        self._check_status(sw1, sw2)
-                        response, sw1, sw2 = connection.transmit(list(challenge_apdu))
-                        self._check_status(sw1, sw2)
-            except PcscOtpError:
-                raise
-            except Exception as error:
-                raise PcscOtpError("NFC YubiKey communication failed") from error
+                        with card_service_context as card_service:
+                            connection = card_service.connection
+                            connection.connect()
+                            _select_data, sw1, sw2 = connection.transmit(
+                                list(self._SELECT_OTP)
+                            )
+                            self._check_status(sw1, sw2)
+                            response, sw1, sw2 = connection.transmit(
+                                list(challenge_apdu)
+                            )
+                            self._check_status(sw1, sw2)
+                    break
+                except PcscOtpError:
+                    raise
+                except Exception as error:
+                    can_retry = (
+                        self._is_transient_card_error(error)
+                        and attempt + 1 < self._MAX_EXCHANGE_ATTEMPTS
+                        and time.monotonic() < deadline
+                    )
+                    if can_retry:
+                        continue
+                    raise PcscOtpError(
+                        "NFC YubiKey communication failed"
+                    ) from error
 
         try:
             response_bytes = bytes(response)
