@@ -9,8 +9,13 @@ The bridge is operational. KeePassXC 2.7.12 detects both programmed YubiKey OTP 
 This is the recommended path. It installs the PC/SC bridge, GNOME Secrets,
 py3-pyscard, and the touch-friendly YubiKey provider in one deployment.
 
-The phone must already run the patched postmarketOS kernel described below and
-expose `nfc0`. Install its native build dependencies once:
+The supported baseline is the official postmarketOS v26.06
+`linux-postmarketos-qcom-sdm845` package. It already contains the OnePlus 6/6T
+PN553 device-tree node and the NXP NCI I²C driver; no custom kernel build or
+patch is required. The deployment script checks the running kernel and refuses
+to install unless `nfc0` is available.
+
+On the phone, install its native build dependencies once:
 
 ```sh
 sudo apk add build-base pkgconf pcsc-lite-dev libnl3-dev
@@ -51,7 +56,12 @@ This works _for me_ and is mostly written by Kimi K3. USE AT YOUR OWN RISK.
 - Programmed legacy OTP challenge-response slots: 1 and 2
 - Transport: Linux `AF_NFC`, `NFC_SOCKPROTO_RAW`, ISO-DEP/ISO 14443
 
-The phone contains a patched NFC kernel setup. An unpatched postmarketOS OnePlus 6 is not guaranteed to expose a usable `nfc0`.
+This setup uses the official postmarketOS v26.06 kernel package, not a locally
+patched kernel. The release
+[`sdm845-oneplus-common.dtsi`](https://gitlab.com/sdm845-mainline/linux/-/blob/sdm845-7.1-rc1-r0/arch/arm64/boot/dts/qcom/sdm845-oneplus-common.dtsi)
+defines the PN553 at I²C address `0x28`, and the release
+[kernel configuration](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/blob/v26.06/device/community/linux-postmarketos-qcom-sdm845/config-postmarketos-qcom-sdm845.aarch64)
+enables `CONFIG_NFC_NXP_NCI_I2C`.
 
 ## Architecture
 
@@ -88,6 +98,7 @@ the component envelope and HMAC response exist only in memory.
 - `scripts/deploy-phone`: workstation-to-phone build and deployment flow
 - `scripts/oneplus-nfc-init`: bounded pre-PCSC controller initialization
 - `secrets-overlay/gsecrets/provider/`: GNOME Secrets 9.6 PC/SC YubiKey provider overlay
+- `scripts/check-kernel-nfc`: non-mutating device, kernel-option, driver, and `nfc0` preflight
 - `scripts/install-secrets-on-phone`: pinned Secrets installation with dry-run/apply modes
 - `scripts/secrets-nfc`: overlay-aware GNOME Secrets launcher
 
@@ -121,6 +132,7 @@ make probe
 Use this path when the project checkout is already on the phone:
 
 ```sh
+./scripts/check-kernel-nfc
 make driver test
 sudo ./scripts/install-on-phone
 ./scripts/install-secrets-on-phone --dry-run
@@ -137,6 +149,35 @@ The bridge installer:
 6. Removes obsolete recovery helpers that attempted unsafe live controller resets.
 7. Enables `pcscd.socket` and restarts `pcscd.service`.
 
+### If `nfc0` is missing
+
+First update the official release packages and reboot:
+
+```sh
+sudo apk update
+sudo apk upgrade
+sudo reboot
+```
+
+After reconnecting, run:
+
+```sh
+apk policy linux-postmarketos-qcom-sdm845
+./scripts/check-kernel-nfc
+```
+
+Do not build or flash a custom kernel merely for this project. If the official
+v26.06 package is installed and the preflight still reports no `nfc0`, inspect
+the `nxp_nci_i2c` probe failure:
+
+```sh
+sudo dmesg | grep -Ei 'nfc|nxp|pn553'
+```
+
+Users intentionally running another kernel must provide both the official
+OnePlus PN553 device-tree node and the four NFC options checked by the
+preflight script. Building and flashing such a kernel is device-recovery work
+outside this installer; it is not an automatic or safe fallback.
 
 ## Touch-friendly Secrets workflow
 
@@ -217,7 +258,7 @@ Do not assign file capabilities to a binary in a user-writable directory.
 
 ## PN553 initialization and recovery
 
-The patched controller needs one driver rebind immediately before its first NFC power request. The pcscd override requires `oneplus-nfc-init.service`; because the one-shot does not remain active, it reruns as root before every `pcscd.service` start.
+On the tested kernel, the PN553 needs one driver rebind immediately before its first NFC power request. The pcscd override requires `oneplus-nfc-init.service`; because the one-shot does not remain active, it reruns as root before every `pcscd.service` start.
 
 The override removes `pcscd --auto-exit`: pcsc-lite 2.3.3 on this phone otherwise unlinks `/run/pcscd/pcscd.comm` when it exits while `pcscd.socket` remains active, leaving subsequent clients unable to reactivate the daemon. Verify the latest initializer run with:
 

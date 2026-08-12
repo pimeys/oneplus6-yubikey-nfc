@@ -1,0 +1,65 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+kernel=$(uname -r)
+model=unknown
+if [ -r /proc/device-tree/model ]; then
+	model=$(tr -d '\000' </proc/device-tree/model)
+fi
+
+case "$model" in
+	"OnePlus 6"|"OnePlus 6T")
+		;;
+	*)
+		echo "unsupported device: $model (expected OnePlus 6 or OnePlus 6T)" >&2
+		exit 1
+		;;
+esac
+
+config=
+if [ -r /proc/config.gz ]; then
+	config=/proc/config.gz
+	read_config() { zcat "$config"; }
+elif [ -r "/boot/config-$kernel" ]; then
+	config="/boot/config-$kernel"
+	read_config() { cat "$config"; }
+else
+	echo "cannot read the running kernel configuration" >&2
+	exit 1
+fi
+
+for option in CONFIG_NFC CONFIG_NFC_NCI CONFIG_NFC_NXP_NCI CONFIG_NFC_NXP_NCI_I2C; do
+	if ! read_config | grep -Eq "^${option}=(y|m)$"; then
+		echo "running kernel lacks $option" >&2
+		exit 1
+	fi
+done
+
+if ! modprobe -n nxp_nci_i2c >/dev/null 2>&1; then
+	echo "running kernel does not provide the nxp_nci_i2c module" >&2
+	exit 1
+fi
+
+if [ ! -d /sys/class/nfc/nfc0 ]; then
+	cat >&2 <<EOF
+running kernel has the NFC options, but nfc0 is unavailable
+update to the official postmarketOS v26.06 linux-postmarketos-qcom-sdm845 package,
+reboot, and inspect the nxp_nci_i2c probe messages if the problem remains
+EOF
+	exit 1
+fi
+
+package=unknown
+if command -v apk >/dev/null 2>&1 \
+		&& apk info -e linux-postmarketos-qcom-sdm845 >/dev/null 2>&1; then
+	package=$(apk list --installed linux-postmarketos-qcom-sdm845 \
+		| sed -n '1s/ .*//p')
+fi
+
+printf '%s\n' \
+	"NFC kernel support is ready" \
+	"  device: $model" \
+	"  kernel: $kernel" \
+	"  package: $package" \
+	"  adapter: nfc0"

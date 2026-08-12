@@ -22,7 +22,8 @@ make all test
 ssh -S "$control_path" "$phone" "rm -rf '$remote_dir' && mkdir -p '$remote_dir'"
 scp -o ControlPath="$control_path" -r Makefile README.md src tests vendor packaging scripts \
 	secrets-overlay "$phone:$remote_dir/"
-ssh -S "$control_path" "$phone" "cd '$remote_dir' && make clean && make driver test"
+ssh -S "$control_path" "$phone" \
+	"cd '$remote_dir' && ./scripts/check-kernel-nfc && make clean && make driver test"
 ssh -t -S "$control_path" "$phone" "cd '$remote_dir' && sudo ./scripts/install-on-phone"
 ssh -S "$control_path" "$phone" \
 	"cd '$remote_dir' && ./scripts/install-secrets-on-phone --dry-run"
